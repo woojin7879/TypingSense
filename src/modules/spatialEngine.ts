@@ -375,6 +375,73 @@ export class SpatialEngine {
     this.saveToStorage();
     return true;
   }
+
+  /**
+   * 검지 하나로 순차적으로 누른 4개 기준 키(Q, P, /(또는 M), Z) 위치로부터 키보드 외곽 4개 모서리 산출
+   */
+  public calibrateFromFourKeys(points: {
+    q: CalibrationPoint;
+    p: CalibrationPoint;
+    botRight: CalibrationPoint;
+    z: CalibrationPoint;
+    isSlash?: boolean; // botRight가 Slash(/)인지 M인지 여부
+  }): boolean {
+    const { q, p, botRight, z, isSlash = true } = points;
+
+    // 상단열 Q~P 선분 벡터
+    const topDx = p.x - q.x;
+    const topDy = p.y - q.y;
+
+    // 하단열 Z~botRight 선분 벡터
+    const botDx = botRight.x - z.x;
+    const botDy = botRight.y - z.y;
+
+    // 키보드 세로 방향 벡터 (Q->Z 및 P->botRight)
+    const leftDx = z.x - q.x;
+    const leftDy = z.y - q.y;
+    const rightDx = botRight.x - p.x;
+    const rightDy = botRight.y - p.y;
+
+    // Q키는 전체 폭의 약 12% 지점, P키는 약 86% 지점에 위치 (Q~P 비율: 74%)
+    const topSpanFactor = 0.74;
+    const leftMarginRatio = 0.12 / topSpanFactor;
+    const rightMarginRatio = 0.14 / topSpanFactor;
+
+    // botRight가 Slash인 경우(86% 지점)와 M인 경우(72% 지점) 분기
+    const botSpanFactor = isSlash ? 0.72 : 0.60;
+    const botLeftMarginRatio = 0.14 / botSpanFactor;
+    const botRightMarginRatio = (isSlash ? 0.14 : 0.28) / botSpanFactor;
+
+    // 상하단 여백 (Q/Z 키 중심에서 키보드 플라스틱 프레임 외곽까지의 확장 비율)
+    // Q~Z는 전체 높이(Row 1 ~ Row 3)의 약 44% (전체 4~5개 행 대비)
+    const vMarginTop = 0.38;
+    const vMarginBot = 0.45;
+
+    // 4개 외곽 모서리 계산
+    const topLeft: CalibrationPoint = {
+      x: Math.max(0.01, Math.min(0.99, q.x - topDx * leftMarginRatio - leftDx * vMarginTop)),
+      y: Math.max(0.01, Math.min(0.99, q.y - topDy * leftMarginRatio - leftDy * vMarginTop))
+    };
+
+    const topRight: CalibrationPoint = {
+      x: Math.max(0.01, Math.min(0.99, p.x + topDx * rightMarginRatio - rightDx * vMarginTop)),
+      y: Math.max(0.01, Math.min(0.99, p.y + topDy * rightMarginRatio - rightDy * vMarginTop))
+    };
+
+    const bottomRight: CalibrationPoint = {
+      x: Math.max(0.01, Math.min(0.99, botRight.x + botDx * botRightMarginRatio + rightDx * vMarginBot)),
+      y: Math.max(0.01, Math.min(0.99, botRight.y + botDy * botRightMarginRatio + rightDy * vMarginBot))
+    };
+
+    const bottomLeft: CalibrationPoint = {
+      x: Math.max(0.01, Math.min(0.99, z.x - botDx * botLeftMarginRatio + leftDx * vMarginBot)),
+      y: Math.max(0.01, Math.min(0.99, z.y - botDy * botLeftMarginRatio + leftDy * vMarginBot))
+    };
+
+    this.corners = { topLeft, topRight, bottomRight, bottomLeft };
+    this.saveToStorage();
+    return true;
+  }
 }
 
 export const spatialEngine = new SpatialEngine();

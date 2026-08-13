@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Crosshair, Sparkles, Sliders, CheckCircle2, RotateCcw, Hand, Zap, Camera } from 'lucide-react';
+import { X, Crosshair, Sparkles, Sliders, CheckCircle2, RotateCcw, Hand, Zap, Camera, Check, ArrowRight, MousePointerClick } from 'lucide-react';
 import { spatialEngine, SENSITIVITY_PRESETS } from '../modules/spatialEngine';
 import { FINGERS, CODE_TO_FINGER_MAP } from '../modules/keyboardLayout';
 import { soundManager } from '../modules/soundManager';
@@ -44,6 +44,67 @@ interface CornerHandle {
   color: string;
 }
 
+interface SeqStepConfig {
+  step: number;
+  keyName: 'q' | 'p' | 'botRight' | 'z';
+  keyCode: string;
+  altKeyCode?: string;
+  label: string;
+  subLabel: string;
+  handHint: string;
+  guideText: string;
+  defaultUv: { u: number; v: number };
+  color: string;
+}
+
+const SEQ_STEPS: SeqStepConfig[] = [
+  {
+    step: 0,
+    keyName: 'q',
+    keyCode: 'KeyQ',
+    label: 'Q',
+    subLabel: '좌상단 모서리',
+    handHint: '왼손 검지',
+    guideText: '검지손가락 하나를 펴서 키보드의 [ Q ] (또는 ㅂ) 키를 콕 눌러주세요.',
+    defaultUv: { u: 0.12, v: 0.30 },
+    color: '#f43f5e'
+  },
+  {
+    step: 1,
+    keyName: 'p',
+    keyCode: 'KeyP',
+    label: 'P',
+    subLabel: '우상단 모서리',
+    handHint: '오른손 검지',
+    guideText: '검지손가락 하나를 펴서 키보드의 [ P ] (또는 ㅔ) 키를 콕 눌러주세요.',
+    defaultUv: { u: 0.86, v: 0.30 },
+    color: '#d946ef'
+  },
+  {
+    step: 2,
+    keyName: 'botRight',
+    keyCode: 'Slash',
+    altKeyCode: 'KeyM',
+    label: '/ (또는 M)',
+    subLabel: '우하단 모서리',
+    handHint: '오른손 검지',
+    guideText: '검지손가락 하나를 펴서 키보드의 [ / ] (또는 [ M ]) 키를 콕 눌러주세요.',
+    defaultUv: { u: 0.86, v: 0.74 },
+    color: '#3b82f6'
+  },
+  {
+    step: 3,
+    keyName: 'z',
+    keyCode: 'KeyZ',
+    label: 'Z',
+    subLabel: '좌하단 모서리',
+    handHint: '왼손 검지',
+    guideText: '검지손가락 하나를 펴서 키보드의 [ Z ] (또는 ㅋ) 키를 콕 눌러주세요.',
+    defaultUv: { u: 0.14, v: 0.74 },
+    color: '#10b981'
+  }
+];
+
 export default function KeyboardCalibrationModal({
   isOpen,
   onClose,
@@ -56,9 +117,20 @@ export default function KeyboardCalibrationModal({
   const [corners, setCorners] = useState<CalibrationCorners>(() => ({ ...spatialEngine.corners }));
   const [sensitivityLevel, setSensitivityLevel] = useState<SensitivityLevel>(() => spatialEngine.sensitivityLevel);
   const [draggingCorner, setDraggingCorner] = useState<keyof CalibrationCorners | null>(null);
-  const [activeTab, setActiveTab] = useState<'drag' | 'autorow'>('drag');
+  const [activeTab, setActiveTab] = useState<'seqIndex' | 'drag' | 'autorow'>('seqIndex');
   
-  // 자동 측정 카운트다운 상태
+  // 검지 순차 측정 상태 (Step 0, 1, 2, 3, 4=완료)
+  const [seqStep, setSeqStep] = useState<number>(0);
+  const [capturedSeqPoints, setCapturedSeqPoints] = useState<{
+    q?: CalibrationPoint;
+    p?: CalibrationPoint;
+    botRight?: CalibrationPoint;
+    z?: CalibrationPoint;
+    isSlash?: boolean;
+  }>({});
+  const [seqStatusMessage, setSeqStatusMessage] = useState<{ type: 'info' | 'success' | 'warning'; text: string } | null>(null);
+
+  // 8손가락 자동 측정 카운트다운 상태
   const [countdown, setCountdown] = useState<number | null>(null);
   const [autoCalibMessage, setAutoCalibMessage] = useState<{ type: 'error' | 'info' | 'success'; text: string } | null>(null);
 
@@ -100,10 +172,33 @@ export default function KeyboardCalibrationModal({
       setCorners({ ...spatialEngine.corners });
       setSensitivityLevel(spatialEngine.sensitivityLevel);
       setTestStrike(null);
+      setSeqStep(0);
+      setCapturedSeqPoints({});
+      setSeqStatusMessage(null);
     }
   }, [isOpen]);
 
-  // 실시간 타건 테스트 키 이벤트 리스너
+  // 현재 화면에서 감지되는 검지 끝(Index Fingertip, Landmark #8) 추출 헬퍼
+  const getDetectedFingertip = useCallback((targetHandHint?: string): CalibrationPoint | null => {
+    if (handsData.length === 0) return null;
+
+    let targetHand = handsData[0];
+    if (handsData.length > 1 && targetHandHint) {
+      const isLeft = targetHandHint.includes('왼손');
+      const matched = handsData.find(h => (isLeft ? h.hand === 'Left' : h.hand === 'Right'));
+      if (matched) targetHand = matched;
+    }
+
+    const lm8 = targetHand.landmarks[8]; // Index Tip
+    if (lm8) {
+      // 미러링된 뷰포트 좌표 [0, 1]
+      return { x: 1 - lm8.x, y: lm8.y };
+    }
+
+    return null;
+  }, [handsData]);
+
+  // 키보드 키 이벤트 리스너 (순차 검지 타건 측정 및 실시간 테스트)
   useEffect(() => {
     if (!isOpen) return;
 
@@ -111,6 +206,69 @@ export default function KeyboardCalibrationModal({
       if (['Escape', 'Tab', 'F5', 'F12'].includes(e.key)) return;
 
       const code = e.code;
+
+      // 1. 순차 검지 타건 모드 처리
+      if (activeTab === 'seqIndex' && seqStep < 4) {
+        const currentCfg = SEQ_STEPS[seqStep];
+        const isMatched = code === currentCfg.keyCode || (currentCfg.altKeyCode && code === currentCfg.altKeyCode);
+
+        if (isMatched) {
+          e.preventDefault();
+          const tipPos = getDetectedFingertip(currentCfg.handHint);
+
+          if (!tipPos) {
+            soundManager.playFingerError();
+            setSeqStatusMessage({
+              type: 'warning',
+              text: `⚠️ [${currentCfg.label}] 키를 누른 손가락이 카메라 화면에 보이지 않습니다. 손을 화면에 보이게 올려주세요.`
+            });
+            return;
+          }
+
+          // 해당 키의 좌표 캡처
+          soundManager.playKeypress(true);
+          const nextPoints = { ...capturedSeqPoints };
+          if (currentCfg.keyName === 'q') nextPoints.q = tipPos;
+          if (currentCfg.keyName === 'p') nextPoints.p = tipPos;
+          if (currentCfg.keyName === 'botRight') {
+            nextPoints.botRight = tipPos;
+            nextPoints.isSlash = code === 'Slash';
+          }
+          if (currentCfg.keyName === 'z') nextPoints.z = tipPos;
+
+          setCapturedSeqPoints(nextPoints);
+
+          const nextStep = seqStep + 1;
+          setSeqStep(nextStep);
+
+          if (nextStep < 4) {
+            setSeqStatusMessage({
+              type: 'info',
+              text: `✅ [${currentCfg.label}] 측정 완료! 다음 ${SEQ_STEPS[nextStep].label} 키를 눌러주세요.`
+            });
+          } else {
+            // 4개 기준점 모두 측정 완료!
+            if (nextPoints.q && nextPoints.p && nextPoints.botRight && nextPoints.z) {
+              spatialEngine.calibrateFromFourKeys({
+                q: nextPoints.q,
+                p: nextPoints.p,
+                botRight: nextPoints.botRight,
+                z: nextPoints.z,
+                isSlash: nextPoints.isSlash !== false
+              });
+              setCorners({ ...spatialEngine.corners });
+              soundManager.playSuccess();
+              setSeqStatusMessage({
+                type: 'success',
+                text: '🎉 Q, P, /, Z 4개 기준 키 측정 완료! 키보드 영역이 자동으로 생성되었습니다.'
+              });
+            }
+          }
+          return;
+        }
+      }
+
+      // 2. 실시간 타건 테스트 HUD 반영
       const expectedFingerId = CODE_TO_FINGER_MAP[code];
       const expectedFinger = expectedFingerId ? FINGERS[expectedFingerId] : null;
 
@@ -146,7 +304,7 @@ export default function KeyboardCalibrationModal({
 
     window.addEventListener('keydown', handleKeyDown);
     return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [isOpen, motionState]);
+  }, [isOpen, activeTab, seqStep, capturedSeqPoints, getDetectedFingertip, motionState]);
 
   // 드래그 시작
   const handlePointerDown = (cornerKey: keyof CalibrationCorners, e: React.PointerEvent<HTMLDivElement>) => {
@@ -243,7 +401,9 @@ export default function KeyboardCalibrationModal({
     spatialEngine.resetToDefaults();
     setCorners({ ...spatialEngine.corners });
     setSensitivityLevel('medium');
-    setAutoCalibMessage({ type: 'info', text: '기본 위치로 초기화되었습니다.' });
+    setSeqStep(0);
+    setCapturedSeqPoints({});
+    setSeqStatusMessage({ type: 'info', text: '기본 위치로 초기화되었습니다.' });
   };
 
   if (!isOpen) return null;
@@ -281,6 +441,9 @@ export default function KeyboardCalibrationModal({
   const botZ = interpolatePoint(0.14, 0.74);
   const botM = interpolatePoint(0.70, 0.74);
 
+  const currentSeqConfig = seqStep < 4 ? SEQ_STEPS[seqStep] : null;
+  const currentDetectedTip = getDetectedFingertip(currentSeqConfig?.handHint);
+
   return (
     <div className="modal-backdrop" onClick={onClose}>
       <div className="modal-card calibration-modal-card" onClick={e => e.stopPropagation()}>
@@ -293,7 +456,7 @@ export default function KeyboardCalibrationModal({
             <div>
               <h2 className="modal-title">키보드 위치 캘리브레이션 & 까딱임 방지 설정</h2>
               <p style={{ fontSize: '0.8rem', color: 'var(--text-muted)' }}>
-                웹캠 영상 위에 키보드 영역을 맞추어 오운지 및 까딱임 오감지를 차단합니다.
+                웹캠 영상 위에 실제 키보드 위치를 맞추어 오운지 및 허공 까딱임 오감지를 차단합니다.
               </p>
             </div>
           </div>
@@ -388,12 +551,12 @@ export default function KeyboardCalibrationModal({
                     );
                   })}
 
-                  {/* 주요 기준 키 마커 원 & 텍스트 (Q, P, A, L, Z, M) */}
+                  {/* 주요 기준 키 마커 원 & 텍스트 */}
                   {[
                     { label: 'Q', p: interpolatePoint(0.12, 0.30), color: '#f43f5e' },
                     { label: 'P', p: interpolatePoint(0.85, 0.30), color: '#d946ef' },
-                    { label: 'A (기준)', p: homeA, color: '#10b981' },
-                    { label: 'L (기준)', p: homeL, color: '#8b5cf6' },
+                    { label: 'A', p: homeA, color: '#10b981' },
+                    { label: 'L', p: homeL, color: '#8b5cf6' },
                     { label: 'Z', p: interpolatePoint(0.14, 0.74), color: '#f43f5e' },
                     { label: 'M', p: interpolatePoint(0.70, 0.74), color: '#3b82f6' },
                   ].map(k => (
@@ -413,8 +576,8 @@ export default function KeyboardCalibrationModal({
                   ))}
                 </svg>
 
-                {/* 4개 인터랙티브 드래그 핸들 핀 */}
-                {cornerHandles.map(handle => (
+                {/* 4개 인터랙티브 드래그 핸들 핀 (수동 드래그 탭에서 활성화) */}
+                {activeTab === 'drag' && cornerHandles.map(handle => (
                   <div
                     key={handle.key}
                     className={`calib-corner-pin ${draggingCorner === handle.key ? 'dragging' : ''}`}
@@ -433,30 +596,37 @@ export default function KeyboardCalibrationModal({
                   </div>
                 ))}
 
-                {/* 실시간 8손가락 손끝 표시 */}
-                {handsData.map((h, hIdx) => {
-                  const prefix = h.hand === 'Left' ? 'L_' : 'R_';
-                  return [4, 8, 12, 16, 20].map(tipIdx => {
-                    const lm = h.landmarks[tipIdx];
-                    if (!lm) return null;
-                    const fingerKey = (tipIdx === 4 ? 'THUMB' : `${prefix}${tipIdx === 8 ? 'INDEX' : tipIdx === 12 ? 'MIDDLE' : tipIdx === 16 ? 'RING' : 'PINKY'}`) as FingerId;
-                    const fConfig = FINGERS[fingerKey];
+                {/* 순차 검지 타건 모드 - 현재 타겟 위치 펄스 링 */}
+                {activeTab === 'seqIndex' && currentSeqConfig && (
+                  <div
+                    className="seq-target-pulse-ring"
+                    style={{
+                      left: `${interpolatePoint(currentSeqConfig.defaultUv.u, currentSeqConfig.defaultUv.v).x * 100}%`,
+                      top: `${interpolatePoint(currentSeqConfig.defaultUv.u, currentSeqConfig.defaultUv.v).y * 100}%`,
+                      borderColor: currentSeqConfig.color
+                    }}
+                  >
+                    <div className="seq-pulse-inner" style={{ backgroundColor: currentSeqConfig.color }}>
+                      {currentSeqConfig.label}
+                    </div>
+                  </div>
+                )}
 
-                    return (
-                      <div
-                        key={`tip-${hIdx}-${tipIdx}`}
-                        className="live-tip-indicator"
-                        style={{
-                          left: `${(1 - lm.x) * 100}%`,
-                          top: `${lm.y * 100}%`,
-                          backgroundColor: fConfig ? fConfig.color : '#ffffff'
-                        }}
-                      />
-                    );
-                  });
-                })}
+                {/* 실시간 감지된 검지 끝 십자선 (Crosshair Cursor) */}
+                {currentDetectedTip && (
+                  <div
+                    className="detected-index-pointer"
+                    style={{
+                      left: `${currentDetectedTip.x * 100}%`,
+                      top: `${currentDetectedTip.y * 100}%`
+                    }}
+                  >
+                    <div className="index-pointer-ring" />
+                    <span className="index-pointer-label">검지 감지</span>
+                  </div>
+                )}
 
-                {/* 카운트다운 오버레이 */}
+                {/* 카운트다운 오버레이 (8손가락 모드) */}
                 {countdown !== null && (
                   <div className="calib-countdown-overlay">
                     <div className="countdown-number">{countdown}</div>
@@ -468,7 +638,9 @@ export default function KeyboardCalibrationModal({
 
             <div className="calib-video-footer">
               <span style={{ fontSize: '0.75rem', color: 'var(--text-muted)' }}>
-                💡 모서리 4개 원형 핀을 드래그하여 실제 물리 키보드 모서리에 맞춰주세요.
+                {activeTab === 'seqIndex' && '💡 검지손가락 하나만 펴서 화면에 표시된 키를 순서대로 하나씩 콕 눌러주세요.'}
+                {activeTab === 'drag' && '💡 4개 모서리 원형 핀을 드래그하여 실제 물리 키보드 모서리에 맞춰주세요.'}
+                {activeTab === 'autorow' && '💡 양손을 기본자리(ASDF-JKL;)에 올린 채 버튼을 누르세요.'}
               </span>
             </div>
           </div>
@@ -477,6 +649,13 @@ export default function KeyboardCalibrationModal({
           <div className="calibration-controls-panel">
             {/* Mode Switch Tabs */}
             <div className="calib-tab-group">
+              <button
+                className={`calib-tab-btn ${activeTab === 'seqIndex' ? 'active' : ''}`}
+                onClick={() => setActiveTab('seqIndex')}
+              >
+                <MousePointerClick size={15} />
+                <span>검지 순차 타건 (추천)</span>
+              </button>
               <button
                 className={`calib-tab-btn ${activeTab === 'drag' ? 'active' : ''}`}
                 onClick={() => setActiveTab('drag')}
@@ -489,11 +668,107 @@ export default function KeyboardCalibrationModal({
                 onClick={() => setActiveTab('autorow')}
               >
                 <Hand size={15} />
-                <span>ASDF-JKL; 자동 측정</span>
+                <span>8손가락 일괄 측정</span>
               </button>
             </div>
 
-            {/* Auto-Calibration Tab Section */}
+            {/* TAB 1: 검지 순차 터치 측정 섹션 (User Requested) */}
+            {activeTab === 'seqIndex' && (
+              <div className="seq-calibration-card">
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <Sparkles size={16} color="var(--primary)" />
+                    <strong style={{ fontSize: '0.9rem' }}>검지 하나 펴고 순차 타건</strong>
+                  </div>
+                  <span className="badge badge-primary" style={{ fontSize: '0.72rem' }}>
+                    {seqStep >= 4 ? '측정 완료 4/4' : `진행 단계 ${seqStep + 1} / 4`}
+                  </span>
+                </div>
+
+                {/* 4단계 스텝 배지 바 */}
+                <div className="seq-step-progress-row">
+                  {SEQ_STEPS.map((s, idx) => {
+                    const isDone = seqStep > idx;
+                    const isCurrent = seqStep === idx;
+                    return (
+                      <div
+                        key={s.keyName}
+                        className={`seq-step-pill ${isDone ? 'done' : ''} ${isCurrent ? 'current' : ''}`}
+                      >
+                        <div className="step-num-circle">
+                          {isDone ? <Check size={12} /> : idx + 1}
+                        </div>
+                        <span className="step-key-name">{s.label}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                {/* 현재 스텝 안내 카드 */}
+                {currentSeqConfig ? (
+                  <div className="seq-current-instruction">
+                    <div className="seq-guide-header">
+                      <div className="seq-target-badge" style={{ backgroundColor: currentSeqConfig.color }}>
+                        {currentSeqConfig.label}
+                      </div>
+                      <div>
+                        <h4 style={{ margin: 0, fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                          {currentSeqConfig.handHint}로 <strong style={{ color: currentSeqConfig.color }}>[{currentSeqConfig.label}]</strong> 키를 누르세요
+                        </h4>
+                        <span style={{ fontSize: '0.74rem', color: 'var(--text-muted)' }}>
+                          {currentSeqConfig.subLabel}
+                        </span>
+                      </div>
+                    </div>
+
+                    <p style={{ fontSize: '0.8rem', color: 'var(--text-secondary)', lineHeight: '1.4', margin: '8px 0 0 0' }}>
+                      {currentSeqConfig.guideText}
+                    </p>
+
+                    <div className="seq-tip-status">
+                      <span style={{ fontSize: '0.75rem', color: currentDetectedTip ? 'var(--success)' : 'var(--warning)' }}>
+                        {currentDetectedTip ? '✅ 검지 손가락 감지 중 (키를 누르면 자동 캡처)' : '⚠️ 검지가 화면에 잘 보이게 올려주세요'}
+                      </span>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="seq-complete-banner">
+                    <CheckCircle2 size={24} color="var(--success)" />
+                    <div>
+                      <strong style={{ fontSize: '0.92rem', color: 'var(--text-primary)' }}>
+                        4개 기준 키 측정이 모두 완료되었습니다!
+                      </strong>
+                      <p style={{ fontSize: '0.78rem', color: 'var(--text-muted)', margin: '4px 0 0 0' }}>
+                        아래 [설정 저장 및 적용]을 눌러 연습을 시작하세요.
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {seqStatusMessage && (
+                  <div className={`calib-toast ${seqStatusMessage.type}`} style={{ marginTop: '8px' }}>
+                    <span>{seqStatusMessage.text}</span>
+                  </div>
+                )}
+
+                {seqStep > 0 && (
+                  <button
+                    className="btn btn-secondary"
+                    style={{ width: '100%', marginTop: '10px', fontSize: '0.78rem', padding: '6px' }}
+                    onClick={() => {
+                      setSeqStep(0);
+                      setCapturedSeqPoints({});
+                      setSeqStatusMessage({ type: 'info', text: '1단계 [ Q ] 키부터 다시 측정합니다.' });
+                    }}
+                  >
+                    <RotateCcw size={12} />
+                    <span>1단계부터 다시 측정</span>
+                  </button>
+                )}
+              </div>
+            )}
+
+            {/* TAB 3: 8손가락 일괄 측정 섹션 */}
             {activeTab === 'autorow' && (
               <div className="autorow-card">
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>

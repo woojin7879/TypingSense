@@ -1172,3 +1172,199 @@ button, input, select {
   transition: width 0.08s ease;
 }
 
+/* ==========================================================================
+   Sequential Index Finger Calibration Styles (User-Requested)
+   ========================================================================== */
+.seq-calibration-card {
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.seq-step-progress-row {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.seq-step-pill {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: var(--radius-sm);
+  padding: 6px 8px;
+  font-size: 0.76rem;
+  color: var(--text-muted);
+  transition: all 0.2s ease;
+}
+
+.seq-step-pill.current {
+  border-color: var(--primary);
+  background-color: rgba(59, 130, 246, 0.12);
+  color: var(--text-primary);
+  font-weight: 700;
+  box-shadow: 0 0 8px rgba(59, 130, 246, 0.25);
+}
+
+.seq-step-pill.done {
+  border-color: var(--success);
+  background-color: rgba(16, 185, 129, 0.1);
+  color: var(--success);
+  font-weight: 600;
+}
+
+.step-num-circle {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background-color: var(--bg-surface-elevated);
+  border: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 0.68rem;
+  flex-shrink: 0;
+}
+
+.seq-step-pill.current .step-num-circle {
+  background-color: var(--primary);
+  color: white;
+  border-color: var(--primary);
+}
+
+.seq-step-pill.done .step-num-circle {
+  background-color: var(--success);
+  color: white;
+  border-color: var(--success);
+}
+
+.step-key-name {
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.seq-current-instruction {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-md);
+  padding: 12px 14px;
+}
+
+.seq-guide-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.seq-target-badge {
+  width: 38px;
+  height: 38px;
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.15rem;
+  font-weight: 800;
+  color: white;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+  animation: pulse-glow 1.5s infinite;
+}
+
+@keyframes pulse-glow {
+  0%, 100% { transform: scale(1); filter: brightness(1); }
+  50% { transform: scale(1.06); filter: brightness(1.2); }
+}
+
+.seq-tip-status {
+  margin-top: 10px;
+  padding-top: 8px;
+  border-top: 1px solid var(--border-subtle);
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.seq-complete-banner {
+  background-color: rgba(16, 185, 129, 0.12);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  border-radius: var(--radius-md);
+  padding: 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Pulsing Target Ring on Video Viewport */
+.seq-target-pulse-ring {
+  position: absolute;
+  width: 44px;
+  height: 44px;
+  border-radius: 50%;
+  border: 2px dashed #f43f5e;
+  transform: translate(-50%, -50%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  pointer-events: none;
+  z-index: 25;
+  animation: target-spin-pulse 2s infinite linear;
+}
+
+@keyframes target-spin-pulse {
+  0% { transform: translate(-50%, -50%) rotate(0deg) scale(0.95); opacity: 0.85; }
+  50% { transform: translate(-50%, -50%) rotate(180deg) scale(1.15); opacity: 1; }
+  100% { transform: translate(-50%, -50%) rotate(360deg) scale(0.95); opacity: 0.85; }
+}
+
+.seq-pulse-inner {
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: white;
+  font-size: 0.82rem;
+  font-weight: 800;
+  box-shadow: 0 0 10px currentColor;
+}
+
+/* Real-time Index Finger Pointer Crosshair */
+.detected-index-pointer {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  pointer-events: none;
+  z-index: 30;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  transition: left 0.04s linear, top 0.04s linear;
+}
+
+.index-pointer-ring {
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  border: 2px solid #22c55e;
+  background-color: rgba(34, 197, 94, 0.25);
+  box-shadow: 0 0 10px #22c55e;
+}
+
+.index-pointer-label {
+  font-size: 0.65rem;
+  font-weight: 700;
+  color: #22c55e;
+  background-color: rgba(0, 0, 0, 0.75);
+  padding: 1px 4px;
+  border-radius: 3px;
+  margin-top: 2px;
+  white-space: nowrap;
+}
+
+
