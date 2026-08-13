@@ -1,0 +1,16 @@
+{
+  "name": "TypingSense - AI 손가락 교정 타이핑",
+  "short_name": "TypingSense",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#121316",
+  "theme_color": "#2563eb",
+  "description": "웹캠으로 키보드를 찍으며 올바른 10손가락 운지법으로 치지 않으면 타자가 차단되는 지능형 AI 타이핑 연습 앱",
+  "icons": [
+    {
+      "src": "/favicon.svg",
+      "sizes": "192x192 512x512",
+      "type": "image/svg+xml"
+    }
+  ]
+}
