@@ -64,6 +64,13 @@ export class HandTracker {
     this.onHandsUpdate = onHandsUpdate;
   }
 
+  public getStream(): MediaStream | null {
+    if (this.video && this.video.srcObject) {
+      return this.video.srcObject as MediaStream;
+    }
+    return null;
+  }
+
   public setElements(video: HTMLVideoElement | null, canvas: HTMLCanvasElement | null): void {
     this.video = video;
     this.canvas = canvas;

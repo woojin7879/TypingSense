@@ -233,6 +233,9 @@ export default function App() {
         onClose={() => setCalibrationModalOpen(false)}
         handsData={handsData}
         motionState={motionState}
+        trackerRef={trackerRef}
+        cameraActive={cameraActive}
+        onToggleCamera={() => handleToggleCamera()}
       />
 
       <StatsModal

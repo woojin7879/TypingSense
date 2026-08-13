@@ -1,8 +1,9 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { X, Crosshair, Sparkles, Sliders, CheckCircle2, RotateCcw, Hand, Zap } from 'lucide-react';
+import { X, Crosshair, Sparkles, Sliders, CheckCircle2, RotateCcw, Hand, Zap, Camera } from 'lucide-react';
 import { spatialEngine, SENSITIVITY_PRESETS } from '../modules/spatialEngine';
 import { FINGERS, CODE_TO_FINGER_MAP } from '../modules/keyboardLayout';
 import { soundManager } from '../modules/soundManager';
+import { HandTracker } from '../modules/handTracker';
 import {
   CalibrationCorners,
   CalibrationPoint,
@@ -20,6 +21,9 @@ export interface KeyboardCalibrationModalProps {
   onClose: () => void;
   handsData?: HandData[];
   motionState?: MotionState;
+  trackerRef?: React.MutableRefObject<HandTracker | null>;
+  cameraActive?: boolean;
+  onToggleCamera?: () => Promise<void> | void;
 }
 
 interface TestStrikeState {
@@ -44,7 +48,10 @@ export default function KeyboardCalibrationModal({
   isOpen,
   onClose,
   handsData = [],
-  motionState = {}
+  motionState = {},
+  trackerRef,
+  cameraActive = false,
+  onToggleCamera
 }: KeyboardCalibrationModalProps) {
   const [corners, setCorners] = useState<CalibrationCorners>(() => ({ ...spatialEngine.corners }));
   const [sensitivityLevel, setSensitivityLevel] = useState<SensitivityLevel>(() => spatialEngine.sensitivityLevel);
@@ -59,7 +66,32 @@ export default function KeyboardCalibrationModal({
   const [testStrike, setTestStrike] = useState<TestStrikeState | null>(null);
 
   const containerRef = useRef<HTMLDivElement>(null);
+  const videoRef = useRef<HTMLVideoElement>(null);
   const svgRef = useRef<SVGSVGElement>(null);
+
+  // 모달이 열리거나 카메라 상태가 변경될 때 웹캠 비디오 스트림 연결
+  useEffect(() => {
+    let timeoutId: number;
+
+    const attachStream = () => {
+      if (isOpen && videoRef.current && trackerRef?.current) {
+        const stream = trackerRef.current.getStream();
+        if (stream && videoRef.current.srcObject !== stream) {
+          videoRef.current.srcObject = stream;
+          videoRef.current.play().catch(e => console.warn('Modal video play catch:', e));
+        }
+      }
+    };
+
+    attachStream();
+    if (isOpen && cameraActive) {
+      timeoutId = window.setTimeout(attachStream, 250);
+    }
+
+    return () => {
+      window.clearTimeout(timeoutId);
+    };
+  }, [isOpen, cameraActive, trackerRef]);
 
   // 모달이 열릴 때 최신 설정값 동기화
   useEffect(() => {
@@ -275,6 +307,32 @@ export default function KeyboardCalibrationModal({
           {/* Left Column: Interactive Video & Grid Overlay */}
           <div className="calibration-video-panel">
             <div className="calibration-video-wrapper" ref={containerRef}>
+              {/* 실시간 웹캠 비디오 */}
+              <video
+                ref={videoRef}
+                className="calibration-webcam-video"
+                playsInline
+                muted
+                autoPlay
+              />
+
+              {/* 카메라 꺼짐 오버레이 */}
+              {!cameraActive && (
+                <div className="calib-camera-off-overlay">
+                  <Camera size={32} color="var(--text-muted)" />
+                  <p style={{ margin: 0, lineHeight: 1.4 }}>
+                    카메라가 꺼져 있습니다.<br />
+                    키보드 위치를 맞추려면 카메라를 켜주세요.
+                  </p>
+                  {onToggleCamera && (
+                    <button className="btn btn-primary" onClick={() => onToggleCamera()}>
+                      <Camera size={14} />
+                      <span>카메라 켜기</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               <div className="video-inner-guide">
                 <svg ref={svgRef} className="calibration-svg-overlay" viewBox="0 0 100 100" preserveAspectRatio="none">
                   {/* 키보드 외곽 다각형 영역 */}
