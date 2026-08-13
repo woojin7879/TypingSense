@@ -257,17 +257,27 @@ export class SpatialEngine {
       return { matchScore: 1.0, distance: 0, rowDiff: 0, isClose: true, uv };
     }
 
-    // u, v 공간상의 거리 계산 (타원형 거리: 행 오차에 더 민감)
+    // u, v 공간상의 거리 계산 (타원형 거리: 상하 행 오차에 1.6배 민감)
     const du = Math.abs(uv.u - targetKeyUV.u);
     const dv = Math.abs(uv.v - targetKeyUV.v);
     const distance = Math.sqrt(du * du + (dv * 1.6) * (dv * 1.6));
 
     const preset = SENSITIVITY_PRESETS[this.sensitivityLevel] || SENSITIVITY_PRESETS.medium;
-    const tolerance = preset.spatialTolerance;
+    const maxRadius = preset.spatialTolerance * 2.2; // 키 2.2개 반경 이내만 유효
 
-    // 점수: 0.0 ~ 1.0 (가까울수록 1.0)
-    const matchScore = Math.max(0, 1 - (distance / (tolerance * 2.5)));
-    const isClose = distance <= (tolerance * 1.5);
+    let matchScore = 0;
+    let isClose = false;
+
+    if (uv.isInside && distance <= maxRadius) {
+      if (distance <= 0.08) {
+        matchScore = 1.0;
+        isClose = true;
+      } else {
+        matchScore = Math.max(0, Math.pow(1 - (distance - 0.08) / (maxRadius - 0.08), 1.5));
+        isClose = distance <= preset.spatialTolerance * 1.4;
+      }
+    }
+
     const rowDiff = Math.abs(uv.v - targetKeyUV.v) / 0.22; // 몇 줄 차이나는지
 
     return {
@@ -307,9 +317,9 @@ export class SpatialEngine {
       throw new Error('손가락 끝 관절을 모두 감지하지 못했습니다.');
     }
 
-    // A키(왼손 새끼 끝)와 ;/L키(오른손 새끼/약지 끝)로 홈열 양 끝단 중심선 산출
-    const homeLeft = { x: pA.x, y: pA.y };
-    const homeRight = { x: pSemi.x, y: pSemi.y };
+    // A키(왼손 새끼 끝)와 ;/L키(오른손 새끼/약지 끝)로 미러링된 홈열 양 끝단 중심선 산출
+    const homeLeft = { x: 1 - pA.x, y: pA.y };
+    const homeRight = { x: 1 - pSemi.x, y: pSemi.y };
 
     // 홈열의 전체 벡터
     const dx = homeRight.x - homeLeft.x;

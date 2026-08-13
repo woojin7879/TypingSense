@@ -192,33 +192,72 @@ export class HandTracker {
   }
 
   private processResults(results: MediaPipeResults): void {
-    const handsData: HandData[] = [];
     const timestamp = performance.now();
+    const rawHandsList: Array<{ landmarks: LandmarkPoint[]; score: number }> = [];
 
     if (results.multiHandLandmarks && results.multiHandedness) {
       for (let i = 0; i < results.multiHandLandmarks.length; i++) {
         const landmarks = results.multiHandLandmarks[i];
         const handedness = results.multiHandedness[i];
-        
-        // 미러링된 뷰 보정
-        const rawLabel = handedness.label; // 'Left' or 'Right'
-        const actualHand = rawLabel === 'Left' ? 'Right' : 'Left';
-
-        handsData.push({
-          hand: actualHand,
-          score: handedness.score,
-          landmarks: landmarks
+        rawHandsList.push({
+          landmarks,
+          score: handedness?.score ?? 0.9
         });
       }
     }
 
+    // 공간 및 해부학적 구조 기반 완벽한 왼손/오른손 판별
+    const handsData: HandData[] = this.classifyHandSides(rawHandsList);
+
     this.updateMotionBuffer(handsData, timestamp);
     this.lastHandsData = handsData;
 
-    this.drawSkeleton(results);
+    this.drawSkeleton(handsData);
 
     if (this.onHandsUpdate) {
       this.onHandsUpdate(handsData, this.getMotionState());
+    }
+  }
+
+  /**
+   * 타이핑 환경(키보드 위 손등 노출)에 맞춘 100% 신뢰성 높은 왼손/오른손 분류
+   */
+  private classifyHandSides(rawHands: Array<{ landmarks: LandmarkPoint[]; score: number }>): HandData[] {
+    if (rawHands.length === 0) return [];
+
+    if (rawHands.length === 1) {
+      const h = rawHands[0];
+      const avgMirroredX = h.landmarks.reduce((acc, lm) => acc + (1 - lm.x), 0) / h.landmarks.length;
+      const thumbX = 1 - (h.landmarks[4]?.x ?? 0.5);
+      const pinkyX = 1 - (h.landmarks[20]?.x ?? 0.5);
+
+      let hand: 'Left' | 'Right';
+      if (avgMirroredX < 0.42) {
+        hand = 'Left';
+      } else if (avgMirroredX > 0.58) {
+        hand = 'Right';
+      } else {
+        // 손등이 위를 향한 타건 자세에서 왼손 엄지는 새끼보다 오른쪽에 위치(thumbX > pinkyX)
+        hand = (thumbX > pinkyX) ? 'Left' : 'Right';
+      }
+
+      return [{ hand, score: h.score, landmarks: h.landmarks }];
+    }
+
+    // 2개 손이 감지된 경우: 미러링된 화면 기준 왼쪽(작은 X)에 있는 손이 무조건 왼손!
+    const hand0AvgX = rawHands[0].landmarks.reduce((acc, lm) => acc + (1 - lm.x), 0) / rawHands[0].landmarks.length;
+    const hand1AvgX = rawHands[1].landmarks.reduce((acc, lm) => acc + (1 - lm.x), 0) / rawHands[1].landmarks.length;
+
+    if (hand0AvgX <= hand1AvgX) {
+      return [
+        { hand: 'Left', score: rawHands[0].score, landmarks: rawHands[0].landmarks },
+        { hand: 'Right', score: rawHands[1].score, landmarks: rawHands[1].landmarks }
+      ];
+    } else {
+      return [
+        { hand: 'Right', score: rawHands[0].score, landmarks: rawHands[0].landmarks },
+        { hand: 'Left', score: rawHands[1].score, landmarks: rawHands[1].landmarks }
+      ];
     }
   }
 
@@ -239,7 +278,7 @@ export class HandTracker {
 
         if (tipLandmark) {
           frameSnapshot.fingers[fingerId] = {
-            x: tipLandmark.x,
+            x: 1 - tipLandmark.x, // 미러링된 화면/키보드 영역과 1:1 일치하는 X좌표
             y: tipLandmark.y,
             z: tipLandmark.z,
             flexion: tipLandmark.y - (mcpLandmark ? mcpLandmark.y : 0)
@@ -285,7 +324,7 @@ export class HandTracker {
     this.targetFinger = fingerId;
   }
 
-  public drawSkeleton(results: MediaPipeResults): void {
+  public drawSkeleton(handsData: HandData[]): void {
     if (!this.ctx || !this.canvas) return;
 
     const width = this.canvas.width;
@@ -295,13 +334,12 @@ export class HandTracker {
     // 0. 캘리브레이션된 키보드 영역 오버레이 그리기
     this.drawKeyboardOverlay(width, height);
 
-    if (!results.multiHandLandmarks || !results.multiHandedness) return;
+    if (!handsData || handsData.length === 0) return;
 
-    for (let i = 0; i < results.multiHandLandmarks.length; i++) {
-      const landmarks = results.multiHandLandmarks[i];
-      const handedness = results.multiHandedness[i];
-      const actualHand = handedness.label === 'Left' ? 'Right' : 'Left';
-      const prefix = actualHand === 'Left' ? 'L_' : 'R_';
+    for (let i = 0; i < handsData.length; i++) {
+      const h = handsData[i];
+      const landmarks = h.landmarks;
+      const prefix = h.hand === 'Left' ? 'L_' : 'R_';
 
       // 1. 관절 연결선
       this.drawHandConnections(landmarks, width, height);
@@ -330,8 +368,11 @@ export class HandTracker {
         const y = tipLm.y * height;
         const isTarget = (this.targetFinger === fingerId);
 
+        this.ctx.save();
+        this.ctx.globalAlpha = isTarget ? 1.0 : 0.35;
+
         this.ctx.beginPath();
-        this.ctx.arc(x, y, isTarget ? 9 : 5, 0, 2 * Math.PI);
+        this.ctx.arc(x, y, isTarget ? 10 : 5, 0, 2 * Math.PI);
         this.ctx.fillStyle = fingerConfig.color;
         this.ctx.fill();
         this.ctx.lineWidth = isTarget ? 2.5 : 1;
@@ -339,17 +380,22 @@ export class HandTracker {
         this.ctx.stroke();
 
         if (isTarget) {
+          // 타겟 손가락: 다중 펄스 링 & 네온 발광
           this.ctx.beginPath();
-          this.ctx.arc(x, y, 15 + Math.sin(Date.now() / 150) * 3, 0, 2 * Math.PI);
+          this.ctx.arc(x, y, 16 + Math.sin(Date.now() / 150) * 3, 0, 2 * Math.PI);
           this.ctx.strokeStyle = fingerConfig.color;
-          this.ctx.lineWidth = 2;
+          this.ctx.lineWidth = 2.5;
           this.ctx.stroke();
 
-          this.ctx.font = 'bold 11px Pretendard, sans-serif';
+          this.ctx.font = 'bold 12px Pretendard, sans-serif';
           this.ctx.fillStyle = '#ffffff';
           this.ctx.textAlign = 'center';
-          this.ctx.fillText(fingerConfig.name, x, y - 20);
+          this.ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+          this.ctx.shadowBlur = 6;
+          this.ctx.fillText(`👉 ${fingerConfig.name}`, x, y - 22);
         }
+
+        this.ctx.restore();
       });
     }
   }

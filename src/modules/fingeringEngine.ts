@@ -156,34 +156,42 @@ export class FingeringEngine {
         const m = motionState[fId];
         const tipPos = m.currentPos;
 
-        // 1. 단순 까딱임 필터: 임계 속도보다 낮은 미세 떨림은 패널티
-        let velocityScore = m.velocityY * 10;
-        if (m.velocityY < minVelocityThreshold) {
-          velocityScore *= 0.3;
-        }
-
-        // 2. 키보드 공간 위치 일치도 점수
+        // 1. [최우선] 키보드 공간 위치 일치도 (0 ~ 20점, 거리 멀면 -30점 즉시 배제)
         let spatialScore = 0;
         let spatialMatch: SpatialEvaluation | null = null;
 
         if (tipPos && spatialEngine.enabled) {
           spatialMatch = spatialEngine.evaluateFingerSpatialMatch(tipPos, keyCode);
-          spatialScore = spatialMatch.matchScore * 2.5;
-
-          if (spatialMatch.uv && !spatialMatch.uv.isInside) {
-            spatialScore -= 1.5;
+          
+          if (spatialMatch.matchScore > 0) {
+            // 키 근처에 위치한 손가락: 일치도에 따라 최대 20점 부여
+            spatialScore = spatialMatch.matchScore * 20.0;
+          } else {
+            // 눌린 키와 거리가 먼 손가락: 즉시 큰 패널티로 배제 (-30점)
+            spatialScore = -30.0;
           }
+        } else {
+          // 캘리브레이션 미활성화 시 기본 점수
+          spatialScore = 5.0;
         }
 
-        // 3. 정답 타겟 손가락 보너스
+        // 2. 하강 속도(Velocity): 위치가 맞는 손가락들 중에서 실제 누른 동작 검증 (최대 +5점)
+        let velocityBonus = 0;
+        if (m.velocityY > minVelocityThreshold) {
+          velocityBonus = Math.min(5.0, m.velocityY * 8.0);
+        } else {
+          velocityBonus = -1.0;
+        }
+
+        // 3. 정답 타겟 손가락 소폭 보너스 (+1.5점)
         let targetBonus = 0;
         if (targetFingerId && fId === targetFingerId) {
-          targetBonus = 0.6;
+          targetBonus = 1.5;
         }
 
-        const totalScore = velocityScore + spatialScore + targetBonus;
+        const totalScore = spatialScore + velocityBonus + targetBonus;
 
-        if (totalScore > maxScore && totalScore > preset.strikeScore) {
+        if (totalScore > maxScore && totalScore > 0) {
           maxScore = totalScore;
           bestFinger = fId;
           bestSpatialInfo = spatialMatch;
